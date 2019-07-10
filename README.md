@@ -54,3 +54,4 @@ https://golang.org/pkg/runtime/trace/
 https://golang.org/doc/diagnostics.html
 http://www.brendangregg.com/blog/2017-01-31/golang-bcc-bpf-function-tracing.html
 https://hackernoon.com/strace-in-60-lines-of-go-b4b76e3ecd64
+https://github.com/llvm-mirror/llvm/blob/master/lib/Transforms/Instrumentation/PGOInstrumentation.cpp
