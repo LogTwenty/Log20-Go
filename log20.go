@@ -1,21 +1,3 @@
-// Copyright 2013 Frederik Zipp. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-// Gocyclo calculates the cyclomatic complexities of functions and
-// methods in Go source code.
-//
-// Usage:
-//      gocyclo [<flag> ...] <Go file or directory> ...
-//
-// Flags:
-//      -over N   show functions with complexity > N only and
-//                return exit code 1 if the output is non-empty
-//      -top N    show the top N most complex functions only
-//      -avg      show the average complexity
-//
-// The output fields for each line are:
-// <complexity> <package> <function> <file:row:column>
 package main
 
 import (
@@ -26,61 +8,27 @@ import (
 	"go/token"
 	"io"
 	"log"
+	"math"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
-  "sync"
+	"sync"
 )
 
-const usageDoc = `Calculate cyclomatic complexities of Go functions.
-Usage:
-        gocyclo [flags] <Go file or directory> ...
+var count = 1
 
-Flags:
-        -over N   show functions with complexity > N only and
-                  return exit code 1 if the set is non-empty
-        -top N    show the top N most complex functions only
-        -avg      show the average complexity over all functions,
-                  not depending on whether -over or -top are set
-
-The output fields for each line are:
-<complexity> <package> <function> <file:row:column>
-`
-
-func usage() {
-	fmt.Fprintf(os.Stderr, usageDoc)
-	os.Exit(2)
-}
-
-var (
-	over = flag.Int("over", 0, "show functions with complexity > N only")
-	top  = flag.Int("top", -1, "show the top N most complex functions only")
-	avg  = flag.Bool("avg", false, "show the average complexity")
-  count = 1
-)
 func main() {
 	log.SetFlags(0)
 	log.SetPrefix("gocyclo: ")
-	flag.Usage = usage
 	flag.Parse()
 	args := flag.Args()
 	if len(args) == 0 {
-		usage()
+		os.Exit(2)
 	}
 
-  var counterMutex = &sync.Mutex{}
+	var counterMutex = &sync.Mutex{}
 	BasicBlocks := analyze(args, counterMutex)
-	sort.Sort(byComplexity(BasicBlocks))
-	written := writeBasicBlocks(os.Stdout, BasicBlocks)
-
-	if *avg {
-		showAverage(BasicBlocks)
-	}
-
-	if *over > 0 && written > 0 {
-		os.Exit(1)
-	}
+	writeBasicBlocks(os.Stdout, BasicBlocks)
 }
 
 func analyze(paths []string, counterMutex *sync.Mutex) []BasicBlock {
@@ -120,65 +68,53 @@ func analyzeDir(dirname string, BasicBlocks []BasicBlock, counterMutex *sync.Mut
 }
 
 func writeBasicBlocks(w io.Writer, sortedBasicBlocks []BasicBlock) int {
-	for i, BasicBlock := range sortedBasicBlocks {
-		if i == *top {
-			return i
-		}
-		if BasicBlock.Complexity <= *over {
-			return i
-		}
+	for _, BasicBlock := range sortedBasicBlocks {
 		fmt.Fprintln(w, BasicBlock)
 	}
 	return len(sortedBasicBlocks)
 }
 
-func showAverage(BasicBlocks []BasicBlock) {
-	fmt.Printf("Average: %.3g\n", average(BasicBlocks))
-}
-
-func average(BasicBlocks []BasicBlock) float64 {
-	total := 0
-	for _, s := range BasicBlocks {
-		total += s.Complexity
-	}
-	return float64(total) / float64(len(BasicBlocks))
-}
-
+// BasicBlock should have a descriptive comment
 type BasicBlock struct {
 	PkgName    string
 	FuncName   string
 	Complexity int
 	Pos        token.Position
 	EndPos     token.Position
-  ID int
+	ID         int
+	// MethodSignature string
+	// BasicBlockID    int32
+	NumTrace        int32
+	NumDebug        int32
+	NumInfo         int32
+	NumWarn         int32
+	NumError        int32
+	NumFatal        int32
+	beginLineNo     int32
+	endLineNo       int32
+	predIds         []int32
+	succIds         []int32
 }
+
 
 func (s BasicBlock) String() string {
 	return fmt.Sprintf("%d %s %s %s %s %d", s.Complexity, s.PkgName, s.FuncName, s.Pos, s.EndPos, s.ID)
 }
 
-type byComplexity []BasicBlock
-
-func (s byComplexity) Len() int      { return len(s) }
-func (s byComplexity) Swap(i, j int) { s[i], s[j] = s[j], s[i] }
-func (s byComplexity) Less(i, j int) bool {
-	return s[i].Complexity >= s[j].Complexity
-}
-
 func buildBasicBlocks(f *ast.File, fset *token.FileSet, BasicBlocks []BasicBlock, counterMutex *sync.Mutex) []BasicBlock {
 	for _, decl := range f.Decls {
 		if fn, ok := decl.(*ast.FuncDecl); ok {
-      counterMutex.Lock()
+			counterMutex.Lock()
 			BasicBlocks = append(BasicBlocks, BasicBlock{
 				PkgName:    f.Name.Name,
 				FuncName:   funcName(fn),
 				Complexity: complexity(fn),
 				Pos:        fset.Position(fn.Pos()),
 				EndPos:     fset.Position(fn.End()),
-        ID:         count,
+				ID:         count,
 			})
-      count++
-      counterMutex.Unlock()
+			count++
+			counterMutex.Unlock()
 		}
 	}
 	return BasicBlocks
@@ -229,9 +165,25 @@ func (v *complexityVisitor) Visit(n ast.Node) ast.Visitor {
 		if n.Op == token.LAND || n.Op == token.LOR {
 			v.Complexity++
 		}
-  // We might also need to check Go/Defer statements
+		// We might also need to check Go/Defer statements
 	case *ast.CallExpr:
-    fmt.Printf("%+v\n", n.Fun)
+		fmt.Printf("%+v\n", n.Fun)
 	}
 	return v
+}
+
+func calculateShannonsEntropy(probabilities []float64) float64 {
+	var sum float64
+	for _, probability := range probabilities {
+		sum += (probability * (math.Log2(float64(probability))))
+	}
+	return -sum
+}
+
+func calculateProbablityOfSpecificLog(probabilities []float64) float64 {
+	var sum float64
+	for _, probability := range probabilities {
+		sum += (probability * (math.Log2(float64(probability))))
+	}
+	return -sum
 }

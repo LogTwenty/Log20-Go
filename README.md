@@ -1,5 +1,15 @@
 # Log20 - Go
 
+## Quickstart
+
+### Java Implementation
+
+Log20-java comprises an instrumentation library, a tracing library used for both request tracing and logging, and an LPS placement generator using the algorithm we just examined. The instrumentation library uses Soot for bytecode instrumentation.
+
+The tracing library has low overhead and consists of a scheduler and multiple logging containers (one per thread), each with a 4MB memory buffer. Log entries are of the form timestamp MethodID#BBID, threadID plus any variable values. In the evaluation, each logging invocation takes 43ns on average, compared to 1.5 microseconds for Log4j.
+
+If you’re feeling brave, you can even have Log20 dynamically adjust the placement of log statements at runtime based on continued sampling of traces.
+
 ## Approaches
 
 ### ast.Walk
